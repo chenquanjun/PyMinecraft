@@ -47,10 +47,12 @@ def tex_coords(top, bottom, side):
 
 # 计算草块，沙块，砖块，石块6个面的纹理贴图坐标(用一个list保存)
 # 可以看出除了草块，其他的正方体六个而的贴图都一样
+# 左右 2 上下
 GRASS = tex_coords((1, 0), (0, 1), (0, 0))
 SAND = tex_coords((1, 1), (1, 1), (1, 1))
 BRICK = tex_coords((2, 0), (2, 0), (2, 0))
 STONE = tex_coords((2, 1), (2, 1), (2, 1))
+TNT = tex_coords((3, 1), (3, 1), (3, 0))
 
 # 当前位置向6个方向移动1个单位要用到的增量坐标
 FACES = [
@@ -61,6 +63,7 @@ FACES = [
     ( 0, 0, 1),
     ( 0, 0,-1),
 ]
+
 
 class TextureGroup(pyglet.graphics.Group):
     def __init__(self, path):
@@ -100,7 +103,7 @@ class Model(object):
         self.initialize() # 画出游戏地图
     # 画地图，大小80*80
     def initialize(self):
-        n = 80 # 地图大小
+        n = 30 # 地图大小
         s = 1 # 步长
         y = 0
         for x in xrange(-n, n + 1, s):
@@ -299,6 +302,23 @@ class Model(object):
         while self.queue:
             self.dequeue()
 
+class Effect(object):
+    def __init__(self, model):
+        self.model = model
+
+    #炸弹，以中心点为正方体中心，中心到面的距离形成正方体消失
+    def effect_bomb(self, midPoint, halfLength):
+        if midPoint:
+            x,y,z = midPoint
+            for dx in xrange(-halfLength,halfLength + 1,1):
+                for dy in xrange(-halfLength,halfLength + 1,1):
+                    for dz in xrange(-halfLength,halfLength + 1,1):
+                        point = normalize((x + dx, y + dy, z + dz))
+                        if point in self.model.world:
+                            newTexture = self.model.world[point]
+                            if newTexture != STONE: # 如果block不是石块，就移除它
+                                self.model.remove_block(point)       
+
 class Window(pyglet.window.Window):
     def __init__(self, *args, **kwargs):
         # *args,化序列为位置参数：(1,2) -> func(1,2)
@@ -324,10 +344,20 @@ class Window(pyglet.window.Window):
             key._1, key._2, key._3, key._4, key._5,
             key._6, key._7, key._8, key._9, key._0]
         self.model = Model()
+
+        self.effect = Effect(self.model)
+
         # 游戏窗口左上角的label参数设置
         self.label = pyglet.text.Label('', font_name='Arial', font_size=18, 
             x=10, y=self.height - 10, anchor_x='left', anchor_y='top', 
             color=(0, 0, 0, 255))
+
+        self.debugLabel = pyglet.text.Label('test', font_name='Arial', font_size=18, 
+            x=10, y=self.height - 30, anchor_x='left', anchor_y='top', 
+            color=(255, 0, 0, 255))
+
+        self.debugStr = 'test'
+
         pyglet.clock.schedule_interval(self.update, 1.0 / 60)# 每秒刷新60次
     # 设置鼠标事件是否绑定到游戏窗口
     def set_exclusive_mouse(self, exclusive):
@@ -441,7 +471,9 @@ class Window(pyglet.window.Window):
                         self.model.remove_block(block)
             else: # 如果按下右键，且有previous位置，则在previous处增加方块
                 if previous:
-                    self.model.add_block(previous, self.block)
+                    pX,pY,pZ = previous
+                    if (pX,pY + 1,pZ) != normalize(self.position):
+                        self.model.add_block(previous, self.block)
         else: # 否则隐藏鼠标，并绑定鼠标事件到该窗口
             self.set_exclusive_mouse(True)
     # 鼠标移动事件，处理视角的变化
@@ -475,6 +507,8 @@ class Window(pyglet.window.Window):
         elif symbol in self.num_keys: 
             index = (symbol - self.num_keys[0]) % len(self.inventory) # 0,1,2
             self.block = self.inventory[index] # 取得相应的方块类型
+
+
     # 释放按键事件
     def on_key_release(self, symbol, modifiers):
         if symbol == key.W: # 按键释放时，各方向退回一个单位
@@ -485,6 +519,16 @@ class Window(pyglet.window.Window):
             self.strafe[1] += 1
         elif symbol == key.D:
             self.strafe[1] -= 1
+        elif symbol == key.R: #爆炸TNT模式，移除对准方块以及周围的方块
+            vector = self.get_sight_vector()
+            block, previous = self.model.hit_test(self.position, vector)  
+            self.effect.effect_bomb(block, 2)
+        elif symbol == key.T: #放置一个TNT
+            vector = self.get_sight_vector()
+            block, previous = self.model.hit_test(self.position, vector)  
+            if previous: #放tnt
+                self.model.add_block(previous, TNT)
+                                
     # 窗口大小变化响应事件
     def on_resize(self, width, height):
         # label的纵坐标
@@ -548,6 +592,9 @@ class Window(pyglet.window.Window):
             pyglet.clock.get_fps(), x, y, z, 
             len(self.model._shown), len(self.model.world))
         self.label.draw() # 绘制label的text
+
+        self.debugLabel.text = self.debugStr
+        self.debugLabel.draw() # 绘制label的text
     # 绘制游戏窗口中间的十字，一条横线加一条竖线
     def draw_reticle(self):
         glColor3d(0, 0, 1)
